@@ -1,0 +1,5 @@
+streamlit
+pandas
+requests
+openpyxl  # Necesario para leer archivos .xlsx con pandas
+time
