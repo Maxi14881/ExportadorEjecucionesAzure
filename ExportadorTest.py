@@ -18,7 +18,7 @@ def image_to_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode()
 
-logo_path = "C:/Maxi/Cosas mias/Canal Youtube/Screenshot_46.jpg"
+logo_path = "Screenshot_46.jpg"
 youtube_link = "https://www.youtube.com/@QAtotheSoftware"
 logo_base64 = image_to_base64(logo_path)
 
