@@ -30,6 +30,7 @@ st.markdown(
 )
 
 # --- CSS personalizado ---
+# --- CSS personalizado ---
 st.markdown(
     """
     <style>
@@ -147,6 +148,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 st.markdown(
     """
