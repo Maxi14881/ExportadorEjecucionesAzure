@@ -90,6 +90,66 @@ st.markdown(
 
 st.markdown(
     """
+    <style>
+        /* Labels más grandes y oscuros - Versión mejorada */
+        div[data-testid="stTextInput"] label p,
+        div[data-testid="stFileUploader"] label p,
+        .stTextInput > label > div[data-testid="stMarkdownContainer"] > p,
+        .stFileUploader > label > div[data-testid="stMarkdownContainer"] > p {
+            font-size: 20px !important;
+            color: #222222 !important;
+            font-weight: bold !important;
+        }
+        
+        /* Texto dentro de los inputs */
+        .stTextInput input {
+            font-size: 18px !important;
+            padding: 12px 15px !important;
+        }
+        
+        /* Radio buttons labels */
+        div[role="radiogroup"] > label > div:first-child > div {
+            font-size: 20px !important;
+            color: #222222 !important;
+        }
+        
+        /* Botón principal */
+        div[data-testid="stButton"] > button {
+            font-size: 18px !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
+    <style>
+        /* Título del radio group */
+        div[data-testid="stMarkdownContainer"] p {
+            font-size: 18px !important;
+            font-weight: bold !important;
+            color: #222222 !important;
+        }
+        
+        /* Opciones del radio button */
+        div[role="radiogroup"] label div p {
+            font-size: 16px !important;
+            color: #222222 !important;
+        }
+        
+        /* Tamaño del círculo del radio button */
+        div[role="radiogroup"] label span:first-child {
+            width: 16px !important;
+            height: 16px !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
     <div class="stHeader">
         <h1 style="color: black; margin: 0; text-align: center;">Azure DevOps Test Results Exporter</h1>
     </div>
