@@ -205,8 +205,7 @@ username = ""
 
 # --- Ejecución ---
 if st.button("🔄 Procesar resultados 🧪"):
-    if not organization or not token or not project_name:
-       # st.warning("Por favor completá todos los campos.")
+    if not organization or not token or (project_option == "Proyecto específico" and not project_name):
 
         st.markdown(f'<div class="custom-error">Por favor completá todos los campos.</div>', unsafe_allow_html=True)
         
