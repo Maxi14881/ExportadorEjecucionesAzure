@@ -30,7 +30,28 @@ st.markdown(
 )
 
 # --- CSS personalizado ---
-# --- CSS personalizado ---
+
+st.markdown(
+    """
+    <style>
+        /* Limitar el ancho del contenedor del radio group */
+        div[role="radiogroup"] {
+            max-width: 168px;  /* Ajusta este valor según necesites */
+        }
+        
+        /* Asegurar que los labels no se desborden */
+        div[role="radiogroup"] label {
+            white-space: normal !important;
+            width: 100% !important;
+        }
+        
+        
+        
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.markdown(
     """
     <style>
@@ -149,7 +170,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
 st.markdown(
     """
     <div class="stHeader">
@@ -158,6 +178,8 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+
 
 # --- Sesión HTTP persistente ---
 session = requests.Session()
@@ -254,20 +276,66 @@ def fetch_data_for_project(organization, project_name, plan_id, plan_name, plan_
     return data
 
 # --- Interfaz de usuario ---
-organization = st.text_input("🏢 Nombre de la Organización de Azure DevOps")
-token = st.text_input("🔑 Token personal (PAT)", type="password")
+organization = st.text_input("🏢 Nombre de la Organización de Azure DevOps",key="org")
+token = st.text_input("🔑 Token personal (PAT)", type="password", key="token")
 
 project_option = st.radio("¿Qué deseas exportar?", ["Todos los proyectos", "Proyecto específico"])
 
 project_name = None
 if project_option == "Proyecto específico":
-    project_name = st.text_input("📁 Nombre del proyecto específico")
+    project_name = st.text_input("📁 Nombre del proyecto específico",key="proy")
 
 username = ""
 
+
+##########
+
+import streamlit as st
+
+# Inicializar valores si no existen
+if "org" not in st.session_state:
+    st.session_state["org"] = ""
+if "proy" not in st.session_state:
+    st.session_state["proy"] = ""
+if "token" not in st.session_state:
+    st.session_state["token"] = ""
+if "limpiar" not in st.session_state:
+    st.session_state["limpiar"] = False
+
+# Función para limpiar inputs
+def limpiar_inputs():
+    st.session_state["org"] = ""
+    st.session_state["proy"] = ""
+    st.session_state["token"] = ""
+    st.session_state["limpiar"] = True  # Forzar recarga visual
+
+
+# Botón para limpiar
+#st.button("🧹 Limpiar", on_click=limpiar_inputs)
+
+
+# --- Botones lado a lado ---
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    procesar = st.button("🔄 Procesar resultados 🧪", key="procesar")
+
+with col2:
+    st.button("🧹 Limpiar", on_click=limpiar_inputs)
+
+
+# Recargar la app forzadamente (solo una vez)
+if st.session_state["limpiar"]:
+    st.session_state["limpiar"] = False
+    st.rerun()
+
+
+##########
+
 # --- Ejecución ---
-if st.button("🔄 Procesar resultados 🧪"):
+if procesar :#st.button("🔄 Procesar resultados 🧪"):
     if not organization or not token or (project_option == "Proyecto específico" and not project_name):
+       # st.warning("Por favor completá todos los campos.")
 
         st.markdown(f'<div class="custom-error">Por favor completá todos los campos.</div>', unsafe_allow_html=True)
         
@@ -373,5 +441,8 @@ if st.button("🔄 Procesar resultados 🧪"):
             progress_bar.empty()
             status_text.empty()
             #st.warning("No se encontraron datos para exportar.")
+            
+            #st.warning("Por favor completá todos los campos.")
+            
             st.markdown(f'<div class="custom-warning">No se encontraron datos para exportar.</div>', unsafe_allow_html=True)
         
