@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import base64
 import time  # Nuevo import para manejar pausas
+import xlsxwriter
 
 st.set_page_config(
     page_title="Test Results Exporter",
