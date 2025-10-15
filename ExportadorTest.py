@@ -33,6 +33,15 @@ st.markdown(
 # --- CSS personalizado ---
 
 st.markdown(
+    f'<a href="{youtube_link}" target="_blank">'
+    f'<img src="data:image/jpeg;base64,{logo_base64}" style="width:100%;"/>'
+    '</a>',
+    unsafe_allow_html=True
+)
+
+# --- CSS personalizado ---
+
+st.markdown(
     """
     <style>
         /* Limitar el ancho del contenedor del radio group */
@@ -196,84 +205,236 @@ def get_all_test_plans(organization, project, api_version, username, token):
     response = session.get(url, auth=HTTPBasicAuth(username, token))
     return response.json().get('value', []) if response.status_code == 200 else []
 
+def api_get_all(url, auth, params=None):
+    """Realiza llamadas GET manejando paginación/continuation tokens y devuelve la lista combinada de 'value'."""
+    all_items = []
+    params = params.copy() if params else {}
+    while True:
+        resp = session.get(url, auth=auth, params=params)
+        if resp.status_code != 200:
+            return all_items
+        j = resp.json()
+        items = j.get('value') or j.get('members') or []
+        all_items.extend(items)
+
+        # Intentar detectar token de continuación (cabeceras o campo en body)
+        cont = resp.headers.get('x-ms-continuationtoken') or resp.headers.get('x-ms-continuation-token') or j.get('continuationToken')
+        if not cont:
+            break
+        # Usar param estándar continuationToken para la siguiente petición
+        params['continuationToken'] = cont
+    return all_items
+
+
+def _flatten_suites(nodes):
+    """Aplana una estructura de suites en árbol (retornada por asTreeView=True)."""
+    flat = []
+    for n in nodes:
+        flat.append(n)
+        children = n.get('children') or []
+        if children:
+            flat.extend(_flatten_suites(children))
+    return flat
+
+
 def get_test_suites(organization, project, plan_id, api_version, username, token):
-    url = f"https://dev.azure.com/{organization}/{project}/_apis/testplan/plans/{plan_id}/suites?asTreeView=False&api-version={api_version}"
-    response = session.get(url, auth=HTTPBasicAuth(username, token))
-    if response.status_code == 200:
-        return [s for s in response.json().get('value', []) if s.get('suiteType') == 'requirementTestSuite']
-    return []
+    # Solicitar en modo árbol para obtener suites anidadas y luego aplanar
+    url = f"https://dev.azure.com/{organization}/{project}/_apis/testplan/plans/{plan_id}/suites?asTreeView=True&api-version={api_version}"
+    auth = HTTPBasicAuth(username, token)
+    suites = api_get_all(url, auth)
+    if not suites:
+        return []
+    # La respuesta con asTreeView=True puede venir en 'value' con nodos que contienen 'children'
+    return _flatten_suites(suites)
+
 
 def get_test_runs(organization, project, plan_id, api_version, username, token):
     url = f"https://dev.azure.com/{organization}/{project}/_apis/test/runs?planId={plan_id}&api-version={api_version}"
-    response = session.get(url, auth=HTTPBasicAuth(username, token))
-    return response.json().get('value', []) if response.status_code == 200 else []
+    auth = HTTPBasicAuth(username, token)
+    return api_get_all(url, auth)
+
 
 def get_run_results(organization, project, run_id, api_version, username, token):
     url = f"https://dev.azure.com/{organization}/{project}/_apis/test/runs/{run_id}/results?api-version={api_version}"
-    response = session.get(url, auth=HTTPBasicAuth(username, token))
-    return response.json().get('value', []) if response.status_code == 200 else []
+    auth = HTTPBasicAuth(username, token)
+    return api_get_all(url, auth)
+
 
 def get_test_points(organization, project, plan_id, suite_id, api_version, username, token):
-    url = f"https://dev.azure.com/{organization}/{project}/_apis/testplan/plans/{plan_id}/Suites/{suite_id}/TestPoint?api-version={api_version}"
-    response = session.get(url, auth=HTTPBasicAuth(username, token))
-    return response.json().get('value', []) if response.status_code == 200 else []
+    url = f"https://dev.azure.com/{organization}/{project}/_apis/testplan/plans/{plan_id}/suites/{suite_id}/testpoints?api-version={api_version}"
+    auth = HTTPBasicAuth(username, token)
+    return api_get_all(url, auth)
+
+
+def get_test_cases_in_suite(organization, project, plan_id, suite_id, api_version, username, token):
+    """Devuelve la lista de test case references en una suite (id, name)."""
+    url = f"https://dev.azure.com/{organization}/{project}/_apis/test/Plans/{plan_id}/Suites/{suite_id}/testcases?api-version={api_version}"
+    auth = HTTPBasicAuth(username, token)
+    items = api_get_all(url, auth)
+    testcases = []
+    for it in items:
+        # El elemento puede tener varias estructuras según la versión de la API
+        tc = it.get('testCase') or it.get('testCaseReference') or it
+        # Intentar extraer id y nombre desde posibles ubicaciones
+        tc_id = None
+        tc_name = None
+        if isinstance(tc, dict):
+            tc_id = tc.get('id') or tc.get('testCaseId') or tc.get('workItemId')
+            # Nombre puede estar en 'name' o dentro de 'fields.System.Title'
+            tc_name = tc.get('name') or (tc.get('fields') or {}).get('System.Title') or tc.get('testCaseTitle')
+        else:
+            tc_id = it.get('id')
+            tc_name = it.get('name')
+
+        # Asegurar tipo string para id
+        if tc_id:
+            testcases.append({'id': str(tc_id), 'name': tc_name})
+    return testcases
+
+
+def get_workitems_titles(organization, ids, api_version='7.0', username=None, token=None):
+    """Obtiene en lote los títulos (System.Title) de varios work items (test cases) por sus ids.
+    ids: lista de strings o ints. Devuelve diccionario id->title.
+    """
+    if not ids:
+        return {}
+    out = {}
+    # Azure permite consultar múltiple ids separados por comas
+    chunk_size = 50
+    auth = HTTPBasicAuth(username, token)
+    for i in range(0, len(ids), chunk_size):
+        chunk = ids[i:i+chunk_size]
+        ids_param = ",".join(map(str, chunk))
+        url = f"https://dev.azure.com/{organization}/_apis/wit/workitems?ids={ids_param}&fields=System.Title&api-version={api_version}"
+        resp = session.get(url, auth=auth)
+        if resp.status_code != 200:
+            continue
+        j = resp.json()
+        for wi in j.get('value', []):
+            wid = str(wi.get('id'))
+            title = (wi.get('fields') or {}).get('System.Title')
+            out[wid] = title
+    return out
 
 def fetch_data_for_project(organization, project_name, plan_id, plan_name, plan_iteration, api_version_suites, api_version_runs, api_version_points, api_version_results, username, token):
     data = []
     processed_run_ids = set()
     test_suites = get_test_suites(organization, project_name, plan_id, api_version_suites, username, token)
 
-    with ThreadPoolExecutor() as executor:
-        for suite in test_suites:
-            suite_id = suite['id']
-            suite_name = suite['name']
-            iteration_path = plan_iteration
-
-            future_runs = executor.submit(get_test_runs, organization, project_name, plan_id, api_version_runs, username, token)
-            future_points = executor.submit(get_test_points, organization, project_name, plan_id, suite_id, api_version_points, username, token)
-
-            test_runs = future_runs.result()
-            for run in test_runs:
-                run_id = run['id']
-                if run_id in processed_run_ids:
+    # Pre-obtener todos los runs y sus resultados para mapear por testCase id -> latest result
+    all_runs = get_test_runs(organization, project_name, plan_id, api_version_runs, username, token)
+    run_results_map = {}  # testCaseId -> latest result dict
+    run_info_map = {}
+    for run in all_runs:
+        run_id = run.get('id')
+        run_info_map[run_id] = {'id': run_id, 'name': run.get('name')}
+        results = get_run_results(organization, project_name, run_id, api_version_results, username, token)
+        for r in results:
+            tc = r.get('testCase') or r.get('testCaseReference') or {}
+            tc_id = str(tc.get('id') or tc.get('testCaseId') or tc.get('workItemId') or tc.get('id'))
+            if not tc_id:
+                continue
+            # Preferir resultado más reciente por fecha de completado
+            existing = run_results_map.get(tc_id)
+            r_date = r.get('completedDate') or r.get('dateCompleted')
+            if existing:
+                existing_date = existing.get('completedDate') or existing.get('dateCompleted')
+                if existing_date and r_date and existing_date >= r_date:
                     continue
-                processed_run_ids.add(run_id)
-                run_results = get_run_results(organization, project_name, run_id, api_version_runs, username, token)
-                for result in run_results:
-                    data.append({
-                        "Project Name": project_name,
-                        "Plan Name": plan_name,
-                        "Plan ID": plan_id,
-                        "Suite ID": suite_id,
-                        "Suite Name": suite_name,
-                        "Run ID": run['id'],
-                        "Run Name": run['name'],
-                        "Test Case ID": result.get('testCase', {}).get('id'),
-                        "Test Case Name": result.get('testCase', {}).get('name'),
-                        "Outcome": result.get('outcome'),
-                        "Executed By": result.get('runBy', {}).get('displayName'),
-                        "Execution Date": result.get('completedDate'),
-                        "Iteration Path": iteration_path
-                    })
+            # Guardar run id y run name junto al resultado
+            r['_run_id'] = run_id
+            r['_run_name'] = run.get('name')
+            # Si el resultado contiene referencias al test case con nombre, guardar nombre
+            tc_name = None
+            if isinstance(tc, dict):
+                tc_name = tc.get('name') or (tc.get('fields') or {}).get('System.Title') or tc.get('testCaseTitle')
+            if tc_name:
+                r['_testcase_name'] = tc_name
+            run_results_map[tc_id] = r
 
-            test_points = future_points.result()
-            for point in test_points:
-                if point.get('results', {}).get('outcome') == "unspecified":
-                    data.append({
-                        "Project Name": project_name,
-                        "Plan Name": plan_name,
-                        "Plan ID": plan_id,
-                        "Suite ID": suite_id,
-                        "Suite Name": suite_name,
-                        "Run ID": None,
-                        "Run Name": None,
-                        "Test Case ID": point.get('testCaseReference', {}).get('id'),
-                        "Test Case Name": point.get('testCaseReference', {}).get('name'),
-                        "Outcome": "Active",
-                        "Executed By": point.get('results', {}).get('lastResultDetails', {}).get('runBy', {}).get('displayName'),
-                        "Execution Date": point.get('results', {}).get('lastResultDetails', {}).get('dateCompleted'),
-                        "Iteration Path": iteration_path
-                    })
+    for suite in test_suites:
+        suite_id = suite.get('id')
+        suite_name = suite.get('name')
+        iteration_path = plan_iteration
+
+        # Obtener test cases definidos en la suite
+        testcases = get_test_cases_in_suite(organization, project_name, plan_id, suite_id, api_version_points, username, token)
+
+        # Obtener test points (estado/últimos resultados por test point)
+        test_points = get_test_points(organization, project_name, plan_id, suite_id, api_version_points, username, token)
+        points_map = {}
+        for p in test_points:
+            tc_ref = p.get('testCaseReference') or p.get('testCase') or {}
+            tcid = str(tc_ref.get('id')) if tc_ref else None
+            if tcid:
+                points_map[tcid] = p
+
+        # Para cada test case en la suite, asociar resultado (run) si existe, o punto si está activo
+        for tc in testcases:
+            tcid = tc.get('id')
+            tcname = tc.get('name')
+            # Chequear si hay resultado en run_results_map
+            result = run_results_map.get(tcid)
+            if result:
+                data.append({
+                    "Project Name": project_name,
+                    "Plan Name": plan_name,
+                    "Plan ID": plan_id,
+                    "Suite ID": suite_id,
+                    "Suite Name": suite_name,
+                    "Run ID": result.get('_run_id'),
+                    "Run Name": result.get('_run_name'),
+                    "Test Case ID": tcid,
+                    "Test Case Name": tcname,
+                    "Outcome": result.get('outcome'),
+                    "Executed By": (result.get('runBy') or {}).get('displayName'),
+                    "Execution Date": result.get('completedDate') or result.get('dateCompleted'),
+                    "Iteration Path": iteration_path
+                })
+            else:
+                # Si no hay resultado, mirar test point
+                p = points_map.get(tcid)
+                if p:
+                    last = p.get('results') or p.get('lastResultDetails') or {}
+                    outcome = last.get('outcome') or ("Active" if not last else last.get('outcome'))
+                    executed_by = (last.get('runBy') or {}).get('displayName')
+                    date_completed = last.get('dateCompleted') or last.get('completedDate')
+                else:
+                    outcome = "Not Executed"
+                    executed_by = None
+                    date_completed = None
+
+                # Si no tenemos nombre, intentaremos obtenerlo más tarde en lote
+                data.append({
+                    "Project Name": project_name,
+                    "Plan Name": plan_name,
+                    "Plan ID": plan_id,
+                    "Suite ID": suite_id,
+                    "Suite Name": suite_name,
+                    "Run ID": None,
+                    "Run Name": None,
+                    "Test Case ID": tcid,
+                    "Test Case Name": tcname,
+                    "Outcome": outcome,
+                    "Executed By": executed_by,
+                    "Execution Date": date_completed,
+                    "Iteration Path": iteration_path
+                })
+    # Post-procesamiento: rellenar nombres faltantes consultando work items en lote
+    missing_ids = [str(row['Test Case ID']) for row in data if not row.get('Test Case Name')]
+    if missing_ids:
+        titles = get_workitems_titles(organization, missing_ids, username=username, token=token)
+        for row in data:
+            if not row.get('Test Case Name'):
+                row['Test Case Name'] = titles.get(str(row['Test Case ID']))
+
+    # También, si algún resultado en run_results_map tenía _testcase_name, usarlo cuando falte
+    for row in data:
+        if not row.get('Test Case Name'):
+            rr = run_results_map.get(str(row['Test Case ID']))
+            if rr and rr.get('_testcase_name'):
+                row['Test Case Name'] = rr.get('_testcase_name')
+
     return data
 
 # --- Interfaz de usuario ---
@@ -446,4 +607,3 @@ if procesar :#st.button("🔄 Procesar resultados 🧪"):
             #st.warning("Por favor completá todos los campos.")
             
             st.markdown(f'<div class="custom-warning">No se encontraron datos para exportar.</div>', unsafe_allow_html=True)
-        
