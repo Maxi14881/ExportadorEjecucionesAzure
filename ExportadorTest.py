@@ -197,12 +197,14 @@ def limpiar_inputs():
                 except Exception:
                     pass
 
-    # Forzar recarga completa de la app
+    # No llamar a st.rerun() desde el callback (es un no-op y genera warning).
+    # En su lugar, marcar en session_state que se necesita un rerun y realizarlo
+    # fuera del callback en el flujo principal de la aplicación.
     try:
-        st.experimental_rerun()
+        st.session_state['_do_rerun'] = True
     except Exception:
-        # Fallback a st.rerun si experimental_rerun no está disponible
-        st.rerun()
+        # Si no se puede escribir en session_state, simplemente continuar.
+        pass
 
 
 # --- Sesión HTTP persistente ---
@@ -471,6 +473,22 @@ with col1:
 
 with col2:
     st.button("🧹 Limpiar", on_click=limpiar_inputs)
+
+# Si el callback de limpiar marcó la necesidad de un rerun, hacerlo aquí (fuera del callback)
+try:
+    if st.session_state.get('_do_rerun'):
+        # Limpiar la marca antes de rerun para evitar bucles
+        del st.session_state['_do_rerun']
+        try:
+            st.experimental_rerun()
+        except Exception:
+            try:
+                st.rerun()
+            except Exception:
+                pass
+except Exception:
+    # No enviar error si session_state no es accesible en este contexto
+    pass
 
 # --- Ejecución ---
 if procesar:
